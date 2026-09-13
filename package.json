@@ -1,0 +1,42 @@
+{
+  "name": "cdr.js",
+  "version": "0.1.0",
+  "description": "Query organisations exposing data under Australia's Consumer Data Right.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "cdr": "./bin/cdr.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check bin/cdr.js && node --check src/index.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "australia",
+    "cdr",
+    "consumer-data-right",
+    "open-banking"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erkde/cdr.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/erkde/cdr.js/issues"
+  },
+  "homepage": "https://github.com/erkde/cdr.js#readme",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "sideEffects": false
+}
