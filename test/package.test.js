@@ -12,6 +12,7 @@ test("the package root is importable", async () => {
   assert.equal(typeof cdr.createRegisterClient, "function");
   assert.equal(typeof cdr.listBankingProducts, "function");
   assert.equal(typeof cdr.createBankingClient, "function");
+  assert.equal(typeof cdr.getBankingProduct, "function");
 });
 
 test("the compiled CLI core rejects unknown commands", async () => {

@@ -239,3 +239,108 @@ test("banking products displays a table", async () => {
   assert.match(result.stdout, /^BRAND\s+CATEGORY\s+PRODUCT\s+PRODUCT ID/m);
   assert.match(result.stdout, /Alpha Bank\s+TERM_DEPOSITS\s+Term Deposit/);
 });
+
+test("banking product requires a product ID without making a request", async () => {
+  let called = false;
+  const result = await runCli(
+    ["banking", "product", "--holder", "alpha"],
+    "0.1.0",
+    {
+      listDataHolders: async () => {
+        called = true;
+        return holders;
+      },
+      getBankingProduct: async () => {
+        called = true;
+        return {};
+      },
+    },
+  );
+
+  assert.equal(called, false);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /A product ID is required/);
+});
+
+test("banking product resolves its holder and returns detailed JSON", async () => {
+  const product = {
+    productId: "product-1",
+    lastUpdated: "2026-09-14T00:00:00Z",
+    productCategory: "TERM_DEPOSITS",
+    name: "Term Deposit Deposit",
+    description: "A term deposit.",
+    brand: "Alpha",
+    brandName: "Alpha Bank",
+    isTailored: false,
+    depositRates: [
+      {
+        depositRateType: "FIXED",
+        rate: "0.0515",
+        applicationType: "PERIODIC",
+        applicationFrequency: "P1Y",
+        additionalInfo: "Interest at maturity",
+      },
+    ],
+  };
+  let receivedBaseUrl;
+  let receivedProductId;
+  const result = await runCli(
+    ["banking", "product", "product-1", "--holder=alpha", "--json"],
+    "0.1.0",
+    {
+      listDataHolders: async (options) => {
+        assert.deepEqual(options, { industry: "banking" });
+        return holders;
+      },
+      getBankingProduct: async (baseUrl, productId) => {
+        receivedBaseUrl = baseUrl;
+        receivedProductId = productId;
+        return product;
+      },
+    },
+  );
+
+  assert.equal(receivedBaseUrl, "https://products.alpha.test");
+  assert.equal(receivedProductId, "product-1");
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), product);
+});
+
+test("banking product displays key details and rates", async () => {
+  const product = {
+    productId: "product-1",
+    lastUpdated: "2026-09-14T00:00:00Z",
+    productCategory: "TERM_DEPOSITS",
+    name: "Term Deposit",
+    description: "A term deposit.",
+    brand: "Alpha",
+    brandName: "Alpha Bank",
+    isTailored: false,
+    depositRates: [
+      {
+        depositRateType: "FIXED",
+        rate: "0.0515",
+        applicationType: "PERIODIC",
+        applicationFrequency: "P1Y",
+      },
+    ],
+    constraints: [
+      { constraintType: "MIN_BALANCE", additionalValue: "5000.00" },
+    ],
+  };
+  const result = await runCli(
+    ["banking", "product", "product-1", "--holder", "alpha"],
+    "0.1.0",
+    {
+      listDataHolders: async () => holders,
+      getBankingProduct: async () => product,
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /^Term Deposit\nBrand: Alpha Bank/m);
+  assert.match(result.stdout, /DEPOSIT RATES/);
+  assert.match(result.stdout, /FIXED\s+5\.15%\s+PERIODIC\s+P1Y/);
+  assert.match(result.stdout, /CONSTRAINTS/);
+  assert.match(result.stdout, /MIN_BALANCE\s+5000\.00/);
+});

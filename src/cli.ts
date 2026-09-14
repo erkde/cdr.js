@@ -8,10 +8,14 @@ import {
 import {
   isBankingProductCategory,
   isBankingProductEffective,
+  getBankingProduct,
   listBankingProducts,
   type BankingProduct,
   type BankingProductCategory,
+  type BankingProductDetail,
   type BankingProductEffective,
+  type BankingProductFee,
+  type GetBankingProductOptions,
   type ListBankingProductsOptions,
 } from "./banking.js";
 
@@ -25,6 +29,7 @@ Usage:
 Commands:
   holders           List CDR data-holder brands and their public endpoints
   banking products  List public banking products for a data holder
+  banking product   Get detailed information for one banking product
 
 Options:
   -h, --help     Show help
@@ -40,9 +45,23 @@ Usage:
 
 Commands:
   products  List public products for a banking data holder
+  product   Get detailed information for one banking product
 
 Options:
   -h, --help  Show help
+`;
+
+const bankingProductHelp = `cdr banking product
+
+Get detailed public information for one banking product.
+
+Usage:
+  cdr banking product <product-id> --holder <name-or-id> [options]
+
+Options:
+  --holder <name-or-id>  Data-holder brand name or Register identifier
+  --json                 Output JSON
+  -h, --help             Show help
 `;
 
 const bankingProductsHelp = `cdr banking products
@@ -92,6 +111,11 @@ export interface CliDependencies {
     productBaseUrl: string | URL,
     options?: ListBankingProductsOptions,
   ): Promise<BankingProduct[]>;
+  getBankingProduct(
+    productBaseUrl: string | URL,
+    productId: string,
+    options?: GetBankingProductOptions,
+  ): Promise<BankingProductDetail>;
 }
 
 interface HoldersOptions {
@@ -112,8 +136,16 @@ interface BankingProductsOptions {
   updatedSince?: string;
 }
 
+interface BankingProductOptions {
+  help: boolean;
+  holder?: string;
+  json: boolean;
+  productId?: string;
+}
+
 const defaultDependencies: CliDependencies = {
   listDataHolders,
+  getBankingProduct,
   listBankingProducts,
 };
 
@@ -187,6 +219,10 @@ async function runBanking(
     return { exitCode: 0, stdout: bankingHelp };
   }
 
+  if (command === "product") {
+    return runBankingProduct(commandArgs, dependencies);
+  }
+
   if (command !== "products") {
     return failure(`Unknown banking command: ${command}`, bankingHelp);
   }
@@ -244,6 +280,64 @@ async function runBanking(
       stdout: parsed.json
         ? `${JSON.stringify(filtered, null, 2)}\n`
         : formatProducts(filtered),
+    };
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+    };
+  }
+}
+
+async function runBankingProduct(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const parsed = parseBankingProductOptions(args);
+
+  if (typeof parsed === "string") {
+    return failure(parsed, bankingProductHelp);
+  }
+
+  if (parsed.help) {
+    return { exitCode: 0, stdout: bankingProductHelp };
+  }
+
+  if (parsed.productId === undefined) {
+    return failure("A product ID is required", bankingProductHelp);
+  }
+
+  if (parsed.holder === undefined) {
+    return failure("Option --holder is required", bankingProductHelp);
+  }
+
+  try {
+    const holders = await dependencies.listDataHolders({
+      industry: "banking",
+    });
+    const holder = resolveHolder(holders, parsed.holder);
+
+    if (typeof holder === "string") {
+      return { exitCode: 1, stderr: `${holder}\n` };
+    }
+
+    if (holder.productBaseUri === undefined) {
+      return {
+        exitCode: 1,
+        stderr: `${holder.brandName} does not publish a product API URL.\n`,
+      };
+    }
+
+    const product = await dependencies.getBankingProduct(
+      holder.productBaseUri,
+      parsed.productId,
+    );
+
+    return {
+      exitCode: 0,
+      stdout: parsed.json
+        ? `${JSON.stringify(product, null, 2)}\n`
+        : formatProductDetail(product),
     };
   } catch (error) {
     return {
@@ -455,6 +549,68 @@ function parseBankingProductsOptions(
   return options;
 }
 
+function parseBankingProductOptions(
+  args: readonly string[],
+): BankingProductOptions | string {
+  const options: BankingProductOptions = {
+    help: false,
+    json: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+
+    if (argument === undefined) {
+      continue;
+    }
+
+    if (argument === "--json") {
+      options.json = true;
+      continue;
+    }
+
+    if (argument === "--help" || argument === "-h") {
+      options.help = true;
+      continue;
+    }
+
+    if (argument === "--holder") {
+      const holder = args[index + 1];
+
+      if (holder === undefined || holder.startsWith("-")) {
+        return "Option --holder requires a value";
+      }
+
+      options.holder = holder;
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith("--holder=")) {
+      const holder = argument.slice("--holder=".length);
+
+      if (holder === "") {
+        return "Option --holder requires a value";
+      }
+
+      options.holder = holder;
+      continue;
+    }
+
+    if (argument.startsWith("-")) {
+      return `Unknown option: ${argument}`;
+    }
+
+    if (options.productId !== undefined) {
+      return `Unexpected argument: ${argument}`;
+    }
+
+    options.productId = argument;
+  }
+
+  return options;
+}
+
 function setBankingStringOption(
   options: BankingProductsOptions,
   option: string,
@@ -589,6 +745,192 @@ function formatProducts(products: readonly BankingProduct[]): string {
         .join("  "),
     )
     .join("\n")}\n`;
+}
+
+function formatProductDetail(product: BankingProductDetail): string {
+  const lines = [
+    product.name,
+    `Brand: ${product.brandName ?? product.brand}`,
+    `Category: ${product.productCategory}`,
+    `Product ID: ${product.productId}`,
+    `Last updated: ${product.lastUpdated}`,
+    `Tailored: ${product.isTailored ? "yes" : "no"}`,
+  ];
+
+  if (product.effectiveFrom !== undefined) {
+    lines.push(`Effective from: ${product.effectiveFrom}`);
+  }
+
+  if (product.effectiveTo !== undefined) {
+    lines.push(`Effective to: ${product.effectiveTo}`);
+  }
+
+  if (product.applicationUri !== undefined) {
+    lines.push(`Apply: ${product.applicationUri}`);
+  }
+
+  lines.push("", product.description);
+
+  if (product.depositRates !== undefined && product.depositRates.length > 0) {
+    appendDetailTable(
+      lines,
+      "DEPOSIT RATES",
+      [
+        "TYPE",
+        "RATE",
+        "APPLICATION",
+        "FREQUENCY",
+        "VALUE",
+        "INFORMATION",
+      ],
+      product.depositRates.map((rate) => [
+        rate.depositRateType,
+        formatPercentage(rate.rate),
+        rate.applicationType,
+        rate.applicationFrequency ?? "—",
+        rate.additionalValue ?? "—",
+        rate.additionalInfo ?? "—",
+      ]),
+    );
+  }
+
+  if (product.lendingRates !== undefined && product.lendingRates.length > 0) {
+    appendDetailTable(
+      lines,
+      "LENDING RATES",
+      ["TYPE", "RATE", "COMPARISON", "REPAYMENT", "PURPOSE"],
+      product.lendingRates.map((rate) => [
+        rate.lendingRateType,
+        formatPercentage(rate.rate),
+        rate.comparisonRate === undefined
+          ? "—"
+          : formatPercentage(rate.comparisonRate),
+        rate.repaymentType,
+        rate.loanPurpose,
+      ]),
+    );
+  }
+
+  if (product.fees !== undefined && product.fees.length > 0) {
+    appendDetailTable(
+      lines,
+      "FEES",
+      ["NAME", "TYPE", "CHARGE"],
+      product.fees.map((fee) => [fee.name, fee.feeType, formatFee(fee)]),
+    );
+  }
+
+  if (product.constraints !== undefined && product.constraints.length > 0) {
+    appendDetailTable(
+      lines,
+      "CONSTRAINTS",
+      ["TYPE", "VALUE", "INFORMATION"],
+      product.constraints.map((constraint) => [
+        constraint.constraintType,
+        constraint.additionalValue ?? "—",
+        constraint.additionalInfo ?? "—",
+      ]),
+    );
+  }
+
+  if (product.eligibility !== undefined && product.eligibility.length > 0) {
+    appendDetailTable(
+      lines,
+      "ELIGIBILITY",
+      ["TYPE", "VALUE", "INFORMATION"],
+      product.eligibility.map((eligibility) => [
+        eligibility.eligibilityType,
+        eligibility.additionalValue ?? "—",
+        eligibility.additionalInfo ?? "—",
+      ]),
+    );
+  }
+
+  if (product.features !== undefined && product.features.length > 0) {
+    appendDetailTable(
+      lines,
+      "FEATURES",
+      ["TYPE", "VALUE", "INFORMATION"],
+      product.features.map((feature) => [
+        feature.featureType,
+        feature.additionalValue ?? "—",
+        feature.additionalInfo ?? "—",
+      ]),
+    );
+  }
+
+  if (product.bundles !== undefined && product.bundles.length > 0) {
+    appendDetailTable(
+      lines,
+      "BUNDLES",
+      ["NAME", "DESCRIPTION"],
+      product.bundles.map((bundle) => [bundle.name, bundle.description]),
+    );
+  }
+
+  if (product.instalments !== undefined) {
+    appendDetailTable(
+      lines,
+      "INSTALMENTS",
+      ["MIN SPLIT", "MAX SPLIT", "MIN VALUE", "MAX VALUE"],
+      [[
+        String(product.instalments.minimumSplit),
+        String(product.instalments.maximumSplit),
+        product.instalments.minimumPlanValue ?? "—",
+        product.instalments.maximumPlanValue ?? "—",
+      ]],
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function appendDetailTable(
+  lines: string[],
+  title: string,
+  headings: string[],
+  rows: string[][],
+): void {
+  const widths = headings.map((heading, index) =>
+    Math.max(heading.length, ...rows.map((row) => row[index]?.length ?? 0)),
+  );
+  const table = [headings, ...rows].map((row) =>
+    row
+      .map((cell, index) =>
+        index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0),
+      )
+      .join("  "),
+  );
+
+  lines.push("", title, ...table);
+}
+
+function formatPercentage(value: string): string {
+  const rate = Number(value);
+
+  if (!Number.isFinite(rate)) {
+    return value;
+  }
+
+  return `${(rate * 100).toLocaleString("en-AU", {
+    maximumFractionDigits: 10,
+  })}%`;
+}
+
+function formatFee(fee: BankingProductFee): string {
+  if (fee.fixedAmount !== undefined) {
+    return `${fee.fixedAmount.amount} ${fee.currency ?? "AUD"}`;
+  }
+
+  if (fee.rateBased !== undefined) {
+    return `${formatPercentage(fee.rateBased.rate)} ${fee.rateBased.rateType}`;
+  }
+
+  if (fee.variable !== undefined) {
+    return `${fee.variable.feeMinimum ?? "?"}–${fee.variable.feeMaximum ?? "?"} ${fee.currency ?? "AUD"}`;
+  }
+
+  return "Variable";
 }
 
 function filterAndSortHolders(

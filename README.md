@@ -50,6 +50,16 @@ contains many banking product endpoints and querying all of them would make a
 large number of network requests. Run `cdr banking products --help` for all
 available filters.
 
+Use a product ID from that list to retrieve its full rates, fees, constraints,
+and eligibility details:
+
+```sh
+cdr banking product 6c6f08e9-0d60-44c4-8fc9-79b146366ef9 \
+  --holder Alex.Bank
+cdr banking product 6c6f08e9-0d60-44c4-8fc9-79b146366ef9 \
+  --holder Alex.Bank --json
+```
+
 ## JavaScript API
 
 ```js
@@ -78,6 +88,19 @@ const products = await listBankingProducts(
 of product summaries. The endpoint is public and does not require consumer
 consent. See the [CDR Get Products standard][products-standard] for the fields
 and available filters.
+
+Retrieve the full detail for one of those products:
+
+```js
+import { getBankingProduct } from "cdr.js";
+
+const product = await getBankingProduct(
+  "https://public.cdr.alex.com.au",
+  "6c6f08e9-0d60-44c4-8fc9-79b146366ef9",
+);
+
+console.log(product.depositRates);
+```
 
 [register-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-data-holder-brands-summary
 [products-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-products

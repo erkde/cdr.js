@@ -162,3 +162,152 @@ test("listProducts validates pageSize before making a request", async () => {
   });
   assert.equal(called, false);
 });
+
+test("getProduct requests and parses a complete v7 product detail", async () => {
+  let requestedUrl;
+  let requestedHeaders;
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test/OpenBanking",
+    fetch: async (input, init) => {
+      requestedUrl = String(input);
+      requestedHeaders = new Headers(init?.headers);
+
+      return Response.json({
+        data: {
+          ...firstProduct,
+          bundles: [
+            {
+              name: "Bundle",
+              description: "A product bundle.",
+              productIds: ["another-product"],
+            },
+          ],
+          features: [
+            { featureType: "DIGITAL_BANKING", additionalInfo: "Online." },
+          ],
+          constraints: [
+            { constraintType: "MIN_BALANCE", additionalValue: "5000.00" },
+          ],
+          eligibility: [{ eligibilityType: "NATURAL_PERSON" }],
+          fees: [
+            {
+              name: "Account fee",
+              feeType: "PERIODIC",
+              feeMethodUType: "fixedAmount",
+              fixedAmount: { amount: "5.00" },
+              currency: "AUD",
+              discounts: [
+                {
+                  description: "Staff discount",
+                  discountType: "ELIGIBILITY_ONLY",
+                  discountMethodUType: "fixedAmount",
+                  fixedAmount: { amount: "5.00" },
+                  eligibility: [{ discountEligibilityType: "STAFF" }],
+                },
+              ],
+            },
+          ],
+          depositRates: [
+            {
+              depositRateType: "FIXED",
+              rate: "0.0515",
+              applicationType: "PERIODIC",
+              applicationFrequency: "P1Y",
+              tiers: [
+                {
+                  name: "Amount",
+                  unitOfMeasure: "DOLLAR",
+                  minimumValue: "5000.00",
+                  maximumValue: "250000.00",
+                  rateApplicationMethod: "WHOLE_BALANCE",
+                  applicabilityConditions: [
+                    { rateApplicabilityType: "NEW_CUSTOMER" },
+                  ],
+                },
+              ],
+            },
+          ],
+          lendingRates: [
+            {
+              lendingRateType: "VARIABLE",
+              rate: "0.061",
+              comparisonRate: "0.063",
+              applicationType: "PERIODIC",
+              repaymentType: "PRINCIPAL_AND_INTEREST",
+              loanPurpose: "OWNER_OCCUPIED",
+            },
+          ],
+          instalments: {
+            maximumConcurrentPlans: null,
+            minimumSplit: 4,
+            maximumSplit: 12,
+          },
+        },
+        links: { self: "https://holder.example.test/product" },
+        meta: {},
+      });
+    },
+  });
+
+  const product = await client.getProduct("product/with space");
+
+  assert.equal(
+    requestedUrl,
+    "https://holder.example.test/OpenBanking/cds-au/v1/banking/products/product%2Fwith%20space",
+  );
+  assert.equal(requestedHeaders.get("accept"), "application/json");
+  assert.equal(requestedHeaders.get("x-v"), "7");
+  assert.deepEqual(product.constraints, [
+    { constraintType: "MIN_BALANCE", additionalValue: "5000.00" },
+  ]);
+  assert.deepEqual(product.depositRates[0].tiers[0], {
+    name: "Amount",
+    unitOfMeasure: "DOLLAR",
+    minimumValue: "5000.00",
+    maximumValue: "250000.00",
+    rateApplicationMethod: "WHOLE_BALANCE",
+    applicabilityConditions: [{ rateApplicabilityType: "NEW_CUSTOMER" }],
+  });
+  assert.deepEqual(product.fees[0].discounts, [
+    {
+      description: "Staff discount",
+      discountType: "ELIGIBILITY_ONLY",
+      discountMethodUType: "fixedAmount",
+      fixedAmount: { amount: "5.00" },
+      eligibility: [{ discountEligibilityType: "STAFF" }],
+    },
+  ]);
+  assert.deepEqual(product.instalments, { minimumSplit: 4, maximumSplit: 12 });
+});
+
+test("getProduct rejects an empty product ID before making a request", async () => {
+  let called = false;
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () => {
+      called = true;
+      return Response.json({});
+    },
+  });
+
+  await assert.rejects(client.getProduct("  "), {
+    name: "TypeError",
+    message: "productId must not be empty",
+  });
+  assert.equal(called, false);
+});
+
+test("getProduct exposes unsuccessful response details", async () => {
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () => new Response(null, { status: 404 }),
+  });
+
+  await assert.rejects(
+    client.getProduct("missing"),
+    (error) =>
+      error instanceof CdrBankingError &&
+      error.status === 404 &&
+      error.message === "Banking product request failed with HTTP 404",
+  );
+});
