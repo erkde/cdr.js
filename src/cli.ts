@@ -5,6 +5,15 @@ import {
   type DataHolderBrand,
   type ListDataHoldersOptions,
 } from "./register.js";
+import {
+  isBankingProductCategory,
+  isBankingProductEffective,
+  listBankingProducts,
+  type BankingProduct,
+  type BankingProductCategory,
+  type BankingProductEffective,
+  type ListBankingProductsOptions,
+} from "./banking.js";
 
 const help = `cdr.js
 
@@ -14,11 +23,44 @@ Usage:
   cdr <command> [options]
 
 Commands:
-  holders  List CDR data-holder brands and their public endpoints
+  holders           List CDR data-holder brands and their public endpoints
+  banking products  List public banking products for a data holder
 
 Options:
   -h, --help     Show help
   -v, --version  Show version
+`;
+
+const bankingHelp = `cdr banking
+
+Query public banking data.
+
+Usage:
+  cdr banking <command> [options]
+
+Commands:
+  products  List public products for a banking data holder
+
+Options:
+  -h, --help  Show help
+`;
+
+const bankingProductsHelp = `cdr banking products
+
+List public banking products for one data holder.
+
+Usage:
+  cdr banking products --holder <name-or-id> [options]
+
+Options:
+  --holder <name-or-id>  Data-holder brand name or Register identifier
+  --category <category>  Filter by product category (for example term-deposits)
+  --effective <value>    Filter by current, future, or all (default: current)
+  --updated-since <time> Include products updated after an ISO 8601 date-time
+  --brand <brand>        Filter on the product API's brand field
+  --search <text>        Search product names, brands, descriptions, and IDs
+  --json                 Output JSON
+  -h, --help             Show help
 `;
 
 const holdersHelp = `cdr holders
@@ -46,6 +88,10 @@ export interface CliDependencies {
   listDataHolders(
     options?: ListDataHoldersOptions,
   ): Promise<DataHolderBrand[]>;
+  listBankingProducts(
+    productBaseUrl: string | URL,
+    options?: ListBankingProductsOptions,
+  ): Promise<BankingProduct[]>;
 }
 
 interface HoldersOptions {
@@ -55,7 +101,21 @@ interface HoldersOptions {
   search?: string;
 }
 
-const defaultDependencies: CliDependencies = { listDataHolders };
+interface BankingProductsOptions {
+  brand?: string;
+  category?: BankingProductCategory;
+  effective?: BankingProductEffective;
+  help: boolean;
+  holder?: string;
+  json: boolean;
+  search?: string;
+  updatedSince?: string;
+}
+
+const defaultDependencies: CliDependencies = {
+  listDataHolders,
+  listBankingProducts,
+};
 
 export async function runCli(
   args: readonly string[],
@@ -72,11 +132,22 @@ export async function runCli(
     return { exitCode: 0, stdout: `${version}\n` };
   }
 
-  if (command !== "holders") {
-    return failure(`Unknown command: ${command}`, help);
+  if (command === "holders") {
+    return runHolders(commandArgs, dependencies);
   }
 
-  const parsed = parseHoldersOptions(commandArgs);
+  if (command === "banking") {
+    return runBanking(commandArgs, dependencies);
+  }
+
+  return failure(`Unknown command: ${command}`, help);
+}
+
+async function runHolders(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const parsed = parseHoldersOptions(args);
 
   if (typeof parsed === "string") {
     return failure(parsed, holdersHelp);
@@ -97,6 +168,82 @@ export async function runCli(
       stdout: parsed.json
         ? `${JSON.stringify(filtered, null, 2)}\n`
         : formatHolders(filtered),
+    };
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+    };
+  }
+}
+
+async function runBanking(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const [command, ...commandArgs] = args;
+
+  if (command === undefined || command === "--help" || command === "-h") {
+    return { exitCode: 0, stdout: bankingHelp };
+  }
+
+  if (command !== "products") {
+    return failure(`Unknown banking command: ${command}`, bankingHelp);
+  }
+
+  const parsed = parseBankingProductsOptions(commandArgs);
+
+  if (typeof parsed === "string") {
+    return failure(parsed, bankingProductsHelp);
+  }
+
+  if (parsed.help) {
+    return { exitCode: 0, stdout: bankingProductsHelp };
+  }
+
+  if (parsed.holder === undefined) {
+    return failure("Option --holder is required", bankingProductsHelp);
+  }
+
+  try {
+    const holders = await dependencies.listDataHolders({
+      industry: "banking",
+    });
+    const holder = resolveHolder(holders, parsed.holder);
+
+    if (typeof holder === "string") {
+      return { exitCode: 1, stderr: `${holder}\n` };
+    }
+
+    if (holder.productBaseUri === undefined) {
+      return {
+        exitCode: 1,
+        stderr: `${holder.brandName} does not publish a product API URL.\n`,
+      };
+    }
+
+    const products = await dependencies.listBankingProducts(
+      holder.productBaseUri,
+      {
+        ...(parsed.brand === undefined ? {} : { brand: parsed.brand }),
+        ...(parsed.category === undefined
+          ? {}
+          : { productCategory: parsed.category }),
+        ...(parsed.effective === undefined
+          ? {}
+          : { effective: parsed.effective }),
+        ...(parsed.updatedSince === undefined
+          ? {}
+          : { updatedSince: parsed.updatedSince }),
+      },
+    );
+    const filtered = filterAndSortProducts(products, parsed.search);
+
+    return {
+      exitCode: 0,
+      stdout: parsed.json
+        ? `${JSON.stringify(filtered, null, 2)}\n`
+        : formatProducts(filtered),
     };
   } catch (error) {
     return {
@@ -181,6 +328,267 @@ function parseHoldersOptions(args: readonly string[]): HoldersOptions | string {
   }
 
   return options;
+}
+
+function parseBankingProductsOptions(
+  args: readonly string[],
+): BankingProductsOptions | string {
+  const options: BankingProductsOptions = {
+    help: false,
+    json: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+
+    if (argument === undefined) {
+      continue;
+    }
+
+    if (argument === "--json") {
+      options.json = true;
+      continue;
+    }
+
+    if (argument === "--help" || argument === "-h") {
+      options.help = true;
+      continue;
+    }
+
+    if (
+      argument === "--holder" ||
+      argument === "--brand" ||
+      argument === "--search" ||
+      argument === "--updated-since"
+    ) {
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        return `Option ${argument} requires a value`;
+      }
+
+      setBankingStringOption(options, argument, value);
+      index += 1;
+      continue;
+    }
+
+    if (
+      argument.startsWith("--holder=") ||
+      argument.startsWith("--brand=") ||
+      argument.startsWith("--search=") ||
+      argument.startsWith("--updated-since=")
+    ) {
+      const option = argument.slice(0, argument.indexOf("="));
+      const value = argument.slice(argument.indexOf("=") + 1);
+
+      if (value === "") {
+        return `Option ${option} requires a value`;
+      }
+
+      setBankingStringOption(options, option, value);
+      continue;
+    }
+
+    if (argument === "--category") {
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        return "Option --category requires a value";
+      }
+
+      const category = normalizeCategory(value);
+
+      if (category === undefined) {
+        return `Unknown banking product category: ${value}`;
+      }
+
+      options.category = category;
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith("--category=")) {
+      const value = argument.slice("--category=".length);
+      const category = normalizeCategory(value);
+
+      if (category === undefined) {
+        return `Unknown banking product category: ${value}`;
+      }
+
+      options.category = category;
+      continue;
+    }
+
+    if (argument === "--effective") {
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        return "Option --effective requires a value";
+      }
+
+      const effective = normalizeEffective(value);
+
+      if (effective === undefined) {
+        return `Unknown effective value: ${value}`;
+      }
+
+      options.effective = effective;
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith("--effective=")) {
+      const value = argument.slice("--effective=".length);
+      const effective = normalizeEffective(value);
+
+      if (effective === undefined) {
+        return `Unknown effective value: ${value}`;
+      }
+
+      options.effective = effective;
+      continue;
+    }
+
+    return `Unknown option: ${argument}`;
+  }
+
+  return options;
+}
+
+function setBankingStringOption(
+  options: BankingProductsOptions,
+  option: string,
+  value: string,
+): void {
+  if (option === "--holder") {
+    options.holder = value;
+  } else if (option === "--brand") {
+    options.brand = value;
+  } else if (option === "--search") {
+    options.search = value;
+  } else {
+    options.updatedSince = value;
+  }
+}
+
+function normalizeCategory(value: string): BankingProductCategory | undefined {
+  const category = value.toUpperCase().replaceAll("-", "_");
+  return isBankingProductCategory(category) ? category : undefined;
+}
+
+function normalizeEffective(value: string): BankingProductEffective | undefined {
+  const effective = value.toUpperCase();
+  return isBankingProductEffective(effective) ? effective : undefined;
+}
+
+function resolveHolder(
+  holders: readonly DataHolderBrand[],
+  query: string,
+): DataHolderBrand | string {
+  const needle = normalizeSearch(query);
+  const exact = holders.filter((holder) =>
+    holderIdentityValues(holder).some(
+      (value) => normalizeSearch(value) === needle,
+    ),
+  );
+
+  if (exact.length === 1 && exact[0] !== undefined) {
+    return exact[0];
+  }
+
+  const matches =
+    exact.length > 1
+      ? exact
+      : holders.filter((holder) =>
+          holderIdentityValues(holder).some((value) =>
+            normalizeSearch(value).includes(needle),
+          ),
+        );
+
+  if (matches.length === 0) {
+    return `No banking data holder matches: ${query}`;
+  }
+
+  if (matches.length > 1) {
+    return `Data holder is ambiguous: ${query}\nMatches: ${matches
+      .map((holder) => holder.brandName)
+      .sort((left, right) => left.localeCompare(right, "en-AU"))
+      .join(", ")}`;
+  }
+
+  return matches[0] as DataHolderBrand;
+}
+
+function holderIdentityValues(holder: DataHolderBrand): string[] {
+  return [
+    holder.brandName,
+    holder.dataHolderBrandId,
+    holder.interimId,
+  ].filter((value): value is string => value !== undefined);
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLocaleLowerCase("en-AU");
+}
+
+function filterAndSortProducts(
+  products: readonly BankingProduct[],
+  search: string | undefined,
+): BankingProduct[] {
+  const needle = search === undefined ? undefined : normalizeSearch(search);
+  const filtered = needle
+    ? products.filter((product) =>
+        [
+          product.name,
+          product.brand,
+          product.brandName,
+          product.brandGroup,
+          product.description,
+          product.productId,
+          product.productCategory,
+        ]
+          .filter((value): value is string => value !== undefined)
+          .some((value) => normalizeSearch(value).includes(needle)),
+      )
+    : [...products];
+
+  return filtered.sort(
+    (left, right) =>
+      (left.brandName ?? left.brand).localeCompare(
+        right.brandName ?? right.brand,
+        "en-AU",
+        { sensitivity: "base" },
+      ) ||
+      left.name.localeCompare(right.name, "en-AU", { sensitivity: "base" }) ||
+      left.productId.localeCompare(right.productId, "en-AU"),
+  );
+}
+
+function formatProducts(products: readonly BankingProduct[]): string {
+  if (products.length === 0) {
+    return "No banking products found.\n";
+  }
+
+  const headings = ["BRAND", "CATEGORY", "PRODUCT", "PRODUCT ID"];
+  const rows = products.map((product) => [
+    product.brandName ?? product.brand,
+    product.productCategory,
+    product.name,
+    product.productId,
+  ]);
+  const widths = headings.map((heading, index) =>
+    Math.max(heading.length, ...rows.map((row) => row[index]?.length ?? 0)),
+  );
+
+  return `${[headings, ...rows]
+    .map((row) =>
+      row
+        .map((cell, index) =>
+          index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0),
+        )
+        .join("  "),
+    )
+    .join("\n")}\n`;
 }
 
 function filterAndSortHolders(

@@ -35,6 +35,21 @@ cdr holders --json
 
 Run `cdr holders --help` for all available options.
 
+List the current products published by a banking data holder:
+
+```sh
+cdr banking products --holder Alex.Bank
+cdr banking products --holder Alex.Bank --category term-deposits
+cdr banking products --holder Alex.Bank --effective all
+cdr banking products --holder Alex.Bank --search deposit --json
+```
+
+`--holder` accepts a Register brand name or identifier, as well as an
+unambiguous part of either. It is required because the Register currently
+contains many banking product endpoints and querying all of them would make a
+large number of network requests. Run `cdr banking products --help` for all
+available filters.
+
 ## JavaScript API
 
 ```js
@@ -47,7 +62,25 @@ const holders = await listDataHolders({ industry: "banking" });
 [CDR Register standard][register-standard]. No accreditation or consumer
 consent is required for this endpoint.
 
+Query a holder's public banking product API using its `productBaseUri` from the
+Register:
+
+```js
+import { listBankingProducts } from "cdr.js";
+
+const products = await listBankingProducts(
+  "https://public.cdr.alex.com.au",
+  { productCategory: "TERM_DEPOSITS" },
+);
+```
+
+`listBankingProducts()` follows standard pagination and returns a single array
+of product summaries. The endpoint is public and does not require consumer
+consent. See the [CDR Get Products standard][products-standard] for the fields
+and available filters.
+
 [register-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-data-holder-brands-summary
+[products-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-products
 
 ## Disclaimer
 
