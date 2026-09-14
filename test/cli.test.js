@@ -73,7 +73,7 @@ test("holders displays a sorted table", async () => {
   });
 
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /^BRAND\s+INDUSTRIES\s+PRODUCT API/m);
+  assert.match(result.stdout, /^HOLDER\s+INDUSTRIES\s+PRODUCT API/m);
   assert.ok(result.stdout.indexOf("Alpha Bank") < result.stdout.indexOf("Zeta Energy"));
   assert.match(result.stdout, /https:\/\/products\.alpha\.test/);
 });

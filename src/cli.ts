@@ -970,7 +970,7 @@ function formatHolders(holders: readonly DataHolderBrand[]): string {
     return "No data holders found.\n";
   }
 
-  const headings = ["BRAND", "INDUSTRIES", "PRODUCT API"];
+  const headings = ["HOLDER", "INDUSTRIES", "PRODUCT API"];
   const rows = holders.map((holder) => [
     holder.brandName,
     holder.industries.join(","),
