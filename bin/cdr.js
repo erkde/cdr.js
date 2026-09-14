@@ -6,7 +6,7 @@ import { runCli } from "../dist/cli.js";
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
-const result = runCli(process.argv.slice(2), packageJson.version);
+const result = await runCli(process.argv.slice(2), packageJson.version);
 
 if (result.stdout !== undefined) {
   process.stdout.write(result.stdout);

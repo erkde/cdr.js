@@ -21,18 +21,33 @@ The library is written in TypeScript and compiled to ESM JavaScript with
 bundled declaration files for package consumers. It has no runtime
 dependencies.
 
-## Direction
+## Command line
 
-The initial command-line interface is expected to grow around commands such as:
+List the CDR data-holder brands published by the public CDR Register:
 
-```text
+```sh
 cdr holders
-cdr banking products
-cdr banking rates
-cdr energy plans
+cdr holders --sector banking
+cdr holders --industry banking
+cdr holders --search macquarie
+cdr holders --json
 ```
 
-The same underlying clients will be available through the JavaScript API.
+Run `cdr holders --help` for all available options.
+
+## JavaScript API
+
+```js
+import { listDataHolders } from "cdr.js";
+
+const holders = await listDataHolders({ industry: "banking" });
+```
+
+`listDataHolders()` returns the public brand summaries defined by the
+[CDR Register standard][register-standard]. No accreditation or consumer
+consent is required for this endpoint.
+
+[register-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-data-holder-brands-summary
 
 ## Disclaimer
 

@@ -1,7 +1,14 @@
-/**
- * JavaScript access to Australia's Consumer Data Right.
- *
- * The public API will grow here as the first CDR clients are implemented.
- */
-
-export {};
+export {
+  CDR_INDUSTRIES,
+  CDR_REGISTER_BASE_URL,
+  CdrRegisterError,
+  createRegisterClient,
+  isCdrIndustry,
+  listDataHolders,
+  type CdrIndustry,
+  type CdrIndustryFilter,
+  type DataHolderBrand,
+  type ListDataHoldersOptions,
+  type RegisterClient,
+  type RegisterClientOptions,
+} from "./register.js";

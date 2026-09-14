@@ -8,12 +8,13 @@ const execFileAsync = promisify(execFile);
 test("the package root is importable", async () => {
   const cdr = await import("cdr.js");
 
-  assert.deepEqual(Object.keys(cdr), []);
+  assert.equal(typeof cdr.listDataHolders, "function");
+  assert.equal(typeof cdr.createRegisterClient, "function");
 });
 
 test("the compiled CLI core rejects unknown commands", async () => {
   const { runCli } = await import("../dist/cli.js");
-  const result = runCli(["unknown"], "0.1.0");
+  const result = await runCli(["unknown"], "0.1.0");
 
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /Unknown command: unknown/);
