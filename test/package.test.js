@@ -11,6 +11,14 @@ test("the package root is importable", async () => {
   assert.deepEqual(Object.keys(cdr), []);
 });
 
+test("the compiled CLI core rejects unknown commands", async () => {
+  const { runCli } = await import("../dist/cli.js");
+  const result = runCli(["unknown"], "0.1.0");
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /Unknown command: unknown/);
+});
+
 test("the CLI displays help", async () => {
   const { stdout } = await execFileAsync(
     process.execPath,

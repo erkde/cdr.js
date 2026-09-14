@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "description": "Query organisations exposing data under Australia's Consumer Data Right.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -12,13 +17,16 @@
   },
   "files": [
     "bin",
-    "src",
+    "dist",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/cdr.js && node --check src/index.js",
-    "test": "node --test"
+    "build": "tsc --project tsconfig.json",
+    "check": "tsc --project tsconfig.json --noEmit && node --check bin/cdr.js",
+    "pretest": "npm run build",
+    "test": "node --test",
+    "prepare": "npm run build"
   },
   "keywords": [
     "australia",
@@ -38,5 +46,9 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2"
+  }
 }

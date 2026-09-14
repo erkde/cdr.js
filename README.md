@@ -12,9 +12,14 @@ Requires Node.js 22 or newer.
 
 ```sh
 npm install
+npm run build
 npm test
 node ./bin/cdr.js --help
 ```
+
+The library is written in TypeScript and compiled to ESM JavaScript with
+bundled declaration files for package consumers. It has no runtime
+dependencies.
 
 ## Direction
 
