@@ -345,6 +345,53 @@ test("getProduct rejects an empty product ID before making a request", async () 
   assert.equal(called, false);
 });
 
+test("getProductDocument accepts malformed optional detail fields", async () => {
+  const payload = {
+    data: {
+      ...firstProduct,
+      cardArt: [
+        {
+          cardScheme: null,
+          cardType: null,
+          imageUri: "https://example.test/card.png",
+        },
+      ],
+    },
+    links: {},
+    meta: {},
+  };
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () => Response.json(payload),
+  });
+
+  assert.deepEqual(await client.getProductDocument("product-1"), payload);
+  await assert.rejects(client.getProduct("product-1"), {
+    name: "CdrBankingError",
+    message: "Banking product API returned an unexpected response",
+  });
+});
+
+test("getProductDocument requires a response product ID", async () => {
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () =>
+      Response.json({
+        data: { ...firstProduct, productId: undefined },
+        links: {},
+        meta: {},
+      }),
+  });
+
+  await assert.rejects(
+    client.getProductDocument("product-1"),
+    (error) =>
+      error instanceof CdrBankingError &&
+      error.cause?.message ===
+        "response.data.productId must be a string",
+  );
+});
+
 test("getProduct exposes unsuccessful response details", async () => {
   const client = createBankingClient({
     baseUrl: "https://holder.example.test",

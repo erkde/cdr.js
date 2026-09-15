@@ -480,6 +480,10 @@ export interface BankingClient {
     productId: string,
     options?: GetBankingProductOptions,
   ): Promise<BankingProductDetail>;
+  getProductDocument(
+    productId: string,
+    options?: GetBankingProductOptions,
+  ): Promise<unknown>;
 }
 
 export interface BankingClientOptions {
@@ -528,6 +532,71 @@ export function createBankingClient(
     throw new TypeError("A fetch implementation is required");
   }
 
+  const requestProductDocument = async (
+    productId: string,
+    query: GetBankingProductOptions = {},
+  ): Promise<{ payload: unknown; status: number; url: string }> => {
+    if (productId.trim() === "") {
+      throw new TypeError("productId must not be empty");
+    }
+
+    const url = new URL(
+      encodeURIComponent(productId),
+      `${productsUrl.href}/`,
+    );
+    const request: RequestInit = {
+      headers: {
+        accept: "application/json",
+        "x-v": String(CDR_BANKING_PRODUCT_DETAIL_VERSION),
+        "x-min-v": String(CDR_BANKING_PRODUCT_DETAIL_MIN_VERSION),
+      },
+    };
+
+    if (query.signal !== undefined) {
+      request.signal = query.signal;
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetcher(url, request);
+    } catch (cause) {
+      throw new CdrBankingError(
+        `Unable to reach the banking product API at ${productsUrl.origin}`,
+        { cause, url: url.href },
+      );
+    }
+
+    if (!response.ok) {
+      throw new CdrBankingError(
+        `Banking product request failed with HTTP ${response.status}`,
+        { status: response.status, url: url.href },
+      );
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw new CdrBankingError(
+        "Banking product API returned an invalid JSON response",
+        { cause, status: response.status, url: url.href },
+      );
+    }
+
+    try {
+      parseProductDetailIdResponse(payload);
+    } catch (cause) {
+      throw new CdrBankingError(
+        "Banking product API returned an unexpected response",
+        { cause, status: response.status, url: url.href },
+      );
+    }
+
+    return { payload, status: response.status, url: url.href };
+  };
+
   return {
     listProducts(
       query: ListBankingProductsOptions = {},
@@ -551,65 +620,25 @@ export function createBankingClient(
       );
     },
 
+    async getProductDocument(
+      productId: string,
+      query: GetBankingProductOptions = {},
+    ): Promise<unknown> {
+      return (await requestProductDocument(productId, query)).payload;
+    },
+
     async getProduct(
       productId: string,
       query: GetBankingProductOptions = {},
     ): Promise<BankingProductDetail> {
-      if (productId.trim() === "") {
-        throw new TypeError("productId must not be empty");
-      }
-
-      const url = new URL(
-        encodeURIComponent(productId),
-        `${productsUrl.href}/`,
-      );
-      const request: RequestInit = {
-        headers: {
-          accept: "application/json",
-          "x-v": String(CDR_BANKING_PRODUCT_DETAIL_VERSION),
-          "x-min-v": String(CDR_BANKING_PRODUCT_DETAIL_MIN_VERSION),
-        },
-      };
-
-      if (query.signal !== undefined) {
-        request.signal = query.signal;
-      }
-
-      let response: Response;
+      const result = await requestProductDocument(productId, query);
 
       try {
-        response = await fetcher(url, request);
-      } catch (cause) {
-        throw new CdrBankingError(
-          `Unable to reach the banking product API at ${productsUrl.origin}`,
-          { cause, url: url.href },
-        );
-      }
-
-      if (!response.ok) {
-        throw new CdrBankingError(
-          `Banking product request failed with HTTP ${response.status}`,
-          { status: response.status, url: url.href },
-        );
-      }
-
-      let payload: unknown;
-
-      try {
-        payload = await response.json();
-      } catch (cause) {
-        throw new CdrBankingError(
-          "Banking product API returned an invalid JSON response",
-          { cause, status: response.status, url: url.href },
-        );
-      }
-
-      try {
-        return parseProductDetailResponse(payload);
+        return parseBankingProductDetail(result.payload);
       } catch (cause) {
         throw new CdrBankingError(
           "Banking product API returned an unexpected response",
-          { cause, status: response.status, url: url.href },
+          { cause, status: result.status, url: result.url },
         );
       }
     },
@@ -640,6 +669,17 @@ export function getBankingProduct(
   options?: GetBankingProductOptions,
 ): Promise<BankingProductDetail> {
   return createBankingClient({ baseUrl: productBaseUrl }).getProduct(
+    productId,
+    options,
+  );
+}
+
+export function getBankingProductDocument(
+  productBaseUrl: string | URL,
+  productId: string,
+  options?: GetBankingProductOptions,
+): Promise<unknown> {
+  return createBankingClient({ baseUrl: productBaseUrl }).getProductDocument(
     productId,
     options,
   );
@@ -853,7 +893,15 @@ function parseBankingProduct(value: unknown, path: string): BankingProduct {
   };
 }
 
-function parseProductDetailResponse(value: unknown): BankingProductDetail {
+function parseProductDetailIdResponse(value: unknown): string {
+  const response = expectRecord(value, "response");
+  const detail = expectRecord(response.data, "response.data");
+  return expectString(detail.productId, "response.data.productId");
+}
+
+export function parseBankingProductDetail(
+  value: unknown,
+): BankingProductDetail {
   const response = expectRecord(value, "response");
   const path = "response.data";
   const detail = expectRecord(response.data, path);

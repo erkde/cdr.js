@@ -108,6 +108,13 @@ const product = await getBankingProduct(
 console.log(product.depositRates);
 ```
 
+Archival workflows can use `createBankingClient().getProductDocument()` to
+require a successful JSON response with a string `data.productId` while
+retaining holder-specific fields that do not pass the strict product schema.
+Pass the returned document to `parseBankingProductDetail()` when strict
+validation is useful; `getProduct()` continues to fetch and strictly validate
+in one call.
+
 [register-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-data-holder-brands-summary
 [products-standard]: https://consumerdatastandardsaustralia.github.io/standards/#get-products
 
