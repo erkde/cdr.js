@@ -1,5 +1,7 @@
 export const CDR_BANKING_PRODUCTS_VERSION = 5;
+export const CDR_BANKING_PRODUCTS_MIN_VERSION = 3;
 export const CDR_BANKING_PRODUCT_DETAIL_VERSION = 7;
+export const CDR_BANKING_PRODUCT_DETAIL_MIN_VERSION = 4;
 
 export const BANKING_PRODUCT_CATEGORIES = [
   "BUSINESS_LOANS",
@@ -471,6 +473,9 @@ export interface BankingClient {
   listProducts(
     options?: ListBankingProductsOptions,
   ): Promise<BankingProduct[]>;
+  listProductIds(
+    options?: ListBankingProductsOptions,
+  ): Promise<string[]>;
   getProduct(
     productId: string,
     options?: GetBankingProductOptions,
@@ -524,72 +529,26 @@ export function createBankingClient(
   }
 
   return {
-    async listProducts(
+    listProducts(
       query: ListBankingProductsOptions = {},
     ): Promise<BankingProduct[]> {
-      validatePageSize(query.pageSize);
+      return listProductPages(
+        productsUrl,
+        fetcher,
+        query,
+        parseProductResponse,
+      );
+    },
 
-      const products: BankingProduct[] = [];
-      let page = 1;
-      let totalPages = 1;
-
-      do {
-        const url = productPageUrl(productsUrl, query, page);
-        const request: RequestInit = {
-          headers: {
-            accept: "application/json",
-            "x-v": String(CDR_BANKING_PRODUCTS_VERSION),
-          },
-        };
-
-        if (query.signal !== undefined) {
-          request.signal = query.signal;
-        }
-
-        let response: Response;
-
-        try {
-          response = await fetcher(url, request);
-        } catch (cause) {
-          throw new CdrBankingError(
-            `Unable to reach the banking product API at ${productsUrl.origin}`,
-            { cause, url: url.href },
-          );
-        }
-
-        if (!response.ok) {
-          throw new CdrBankingError(
-            `Banking products request failed with HTTP ${response.status}`,
-            { status: response.status, url: url.href },
-          );
-        }
-
-        let payload: unknown;
-
-        try {
-          payload = await response.json();
-        } catch (cause) {
-          throw new CdrBankingError(
-            "Banking product API returned an invalid JSON response",
-            { cause, status: response.status, url: url.href },
-          );
-        }
-
-        try {
-          const parsed = parseProductResponse(payload);
-          products.push(...parsed.products);
-          totalPages = parsed.totalPages;
-        } catch (cause) {
-          throw new CdrBankingError(
-            "Banking product API returned an unexpected response",
-            { cause, status: response.status, url: url.href },
-          );
-        }
-
-        page += 1;
-      } while (page <= totalPages);
-
-      return products;
+    listProductIds(
+      query: ListBankingProductsOptions = {},
+    ): Promise<string[]> {
+      return listProductPages(
+        productsUrl,
+        fetcher,
+        query,
+        parseProductIdResponse,
+      );
     },
 
     async getProduct(
@@ -608,6 +567,7 @@ export function createBankingClient(
         headers: {
           accept: "application/json",
           "x-v": String(CDR_BANKING_PRODUCT_DETAIL_VERSION),
+          "x-min-v": String(CDR_BANKING_PRODUCT_DETAIL_MIN_VERSION),
         },
       };
 
@@ -665,6 +625,15 @@ export function listBankingProducts(
   );
 }
 
+export function listBankingProductIds(
+  productBaseUrl: string | URL,
+  options?: ListBankingProductsOptions,
+): Promise<string[]> {
+  return createBankingClient({ baseUrl: productBaseUrl }).listProductIds(
+    options,
+  );
+}
+
 export function getBankingProduct(
   productBaseUrl: string | URL,
   productId: string,
@@ -674,6 +643,78 @@ export function getBankingProduct(
     productId,
     options,
   );
+}
+
+async function listProductPages<T>(
+  productsUrl: URL,
+  fetcher: typeof globalThis.fetch,
+  query: ListBankingProductsOptions,
+  parsePage: (value: unknown) => { products: T[]; totalPages: number },
+): Promise<T[]> {
+  validatePageSize(query.pageSize);
+
+  const products: T[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const url = productPageUrl(productsUrl, query, page);
+    const request: RequestInit = {
+      headers: {
+        accept: "application/json",
+        "x-v": String(CDR_BANKING_PRODUCTS_VERSION),
+        "x-min-v": String(CDR_BANKING_PRODUCTS_MIN_VERSION),
+      },
+    };
+
+    if (query.signal !== undefined) {
+      request.signal = query.signal;
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetcher(url, request);
+    } catch (cause) {
+      throw new CdrBankingError(
+        `Unable to reach the banking product API at ${productsUrl.origin}`,
+        { cause, url: url.href },
+      );
+    }
+
+    if (!response.ok) {
+      throw new CdrBankingError(
+        `Banking products request failed with HTTP ${response.status}`,
+        { status: response.status, url: url.href },
+      );
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw new CdrBankingError(
+        "Banking product API returned an invalid JSON response",
+        { cause, status: response.status, url: url.href },
+      );
+    }
+
+    try {
+      const parsed = parsePage(payload);
+      products.push(...parsed.products);
+      totalPages = parsed.totalPages;
+    } catch (cause) {
+      throw new CdrBankingError(
+        "Banking product API returned an unexpected response",
+        { cause, status: response.status, url: url.href },
+      );
+    }
+
+    page += 1;
+  } while (page <= totalPages);
+
+  return products;
 }
 
 function bankingProductsUrl(baseUrl: string | URL): URL {
@@ -755,6 +796,31 @@ function parseProductResponse(value: unknown): {
       parseBankingProduct(item, `response.data.products[${index}]`),
     ),
     totalPages,
+  };
+}
+
+function parseProductIdResponse(value: unknown): {
+  products: string[];
+  totalPages: number;
+} {
+  const response = expectRecord(value, "response");
+  const data = expectRecord(response.data, "response.data");
+  const meta = expectRecord(response.meta, "response.meta");
+
+  if (!Array.isArray(data.products)) {
+    throw new TypeError("response.data.products must be an array");
+  }
+
+  return {
+    products: data.products.map((item, index) => {
+      const path = `response.data.products[${index}]`;
+      const product = expectRecord(item, path);
+      return expectString(product.productId, `${path}.productId`);
+    }),
+    totalPages: expectNonNegativeInteger(
+      meta.totalPages,
+      "response.meta.totalPages",
+    ),
   };
 }
 

@@ -93,6 +93,7 @@ test("listProducts preserves base paths, forwards filters, and fetches every pag
     assert.equal(url.searchParams.get("product-category"), "TERM_DEPOSITS");
     assert.equal(headers.get("accept"), "application/json");
     assert.equal(headers.get("x-v"), "5");
+    assert.equal(headers.get("x-min-v"), "3");
   }
 
   assert.deepEqual(products, [
@@ -114,6 +115,52 @@ test("listProducts preserves base paths, forwards filters, and fetches every pag
     },
     secondProduct,
   ]);
+});
+
+test("listProductIds ignores malformed optional product fields", async () => {
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () =>
+      Response.json(
+        response(
+          [
+            {
+              ...secondProduct,
+              cardArt: [
+                {
+                  cardScheme: null,
+                  cardType: null,
+                  title: "Card",
+                  imageUri: "https://example.test/card.png",
+                },
+              ],
+            },
+          ],
+          1,
+        ),
+      ),
+  });
+
+  await assert.rejects(client.listProducts(), {
+    name: "CdrBankingError",
+    message: "Banking product API returned an unexpected response",
+  });
+  assert.deepEqual(await client.listProductIds(), ["product-2"]);
+});
+
+test("listProductIds still requires every product ID", async () => {
+  const client = createBankingClient({
+    baseUrl: "https://holder.example.test",
+    fetch: async () => Response.json(response([{ name: "Missing ID" }], 1)),
+  });
+
+  await assert.rejects(
+    client.listProductIds(),
+    (error) =>
+      error instanceof CdrBankingError &&
+      error.cause?.message ===
+        "response.data.products[0].productId must be a string",
+  );
 });
 
 test("listProducts rejects unsuccessful responses", async () => {
@@ -257,6 +304,7 @@ test("getProduct requests and parses a complete v7 product detail", async () => 
   );
   assert.equal(requestedHeaders.get("accept"), "application/json");
   assert.equal(requestedHeaders.get("x-v"), "7");
+  assert.equal(requestedHeaders.get("x-min-v"), "4");
   assert.deepEqual(product.constraints, [
     { constraintType: "MIN_BALANCE", additionalValue: "5000.00" },
   ]);

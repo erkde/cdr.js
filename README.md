@@ -89,6 +89,12 @@ of product summaries. The endpoint is public and does not require consumer
 consent. See the [CDR Get Products standard][products-standard] for the fields
 and available filters.
 
+For archival or discovery workflows that only need stable product identifiers,
+`createBankingClient().listProductIds()` validates the response envelope and
+each `productId` without rejecting the page because an optional product field is
+malformed. Both product methods negotiate the supported CDR version range with
+the data holder.
+
 Retrieve the full detail for one of those products:
 
 ```js
